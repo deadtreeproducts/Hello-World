@@ -1,0 +1,50 @@
+name: RX365 Prescription Renewal
+
+on:
+  schedule:
+    # Runs at 10:00 AM UTC on the 10th of every month.
+    # First scheduled run: May 10, 2026.
+    - cron: "0 10 10 * *"
+  workflow_dispatch: # Allows manual triggering from the GitHub Actions UI
+
+jobs:
+  renew-prescriptions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # Kill the job if a browser session hangs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright browser (Chromium only)
+        run: playwright install chromium --with-deps
+        # --with-deps installs required OS-level libraries on the Ubuntu runner
+
+      - name: Run renewal script
+        env:
+          RX365_USER_USERNAME:        ${{ secrets.RX365_USER_USERNAME }}
+          RX365_USER_PASSWORD:        ${{ secrets.RX365_USER_PASSWORD }}
+          RX365_USER_RX_NUMBERS:      ${{ secrets.RX365_USER_RX_NUMBERS }}
+          RX365_WIFE_USERNAME:        ${{ secrets.RX365_WIFE_USERNAME }}
+          RX365_WIFE_PASSWORD:        ${{ secrets.RX365_WIFE_PASSWORD }}
+          RX365_WIFE_RX_NUMBER:       ${{ secrets.RX365_WIFE_RX_NUMBER }}
+          NOTIFICATION_EMAIL_PASSWORD: ${{ secrets.NOTIFICATION_EMAIL_PASSWORD }}
+          CARRIER_SMS_GATEWAY:        ${{ secrets.CARRIER_SMS_GATEWAY }}
+        run: python renew_prescriptions.py
+
+      - name: Upload error screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-screenshots
+          path: "error_*.png"
+          if-no-files-found: ignore
+          retention-days: 7
