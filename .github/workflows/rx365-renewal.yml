@@ -2,7 +2,7 @@ name: RX365 Prescription Renewal
 
 on:
   schedule:
-    # Runs at 10:00 AM UTC on the 10th of every month.
+    # Runs at 09:00 AM UTC on the 10th of every month.
     # First scheduled run: May 10, 2026.
     - cron: "0 10 10 * *"
   workflow_dispatch: # Allows manual triggering from the GitHub Actions UI
