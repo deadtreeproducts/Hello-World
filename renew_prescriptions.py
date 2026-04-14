@@ -143,20 +143,19 @@ def login(page: Page, username: str, password: str) -> None:
             btn.first.click()
             break
 
-    # Wait until the post-login "Menu" element appears
-    page.wait_for_selector("text=Menu", timeout=20_000)
+    # Wait until the post-login sidebar appears (desktop view shows sidebar, not hamburger)
+    page.wait_for_selector("text=Medications", timeout=20_000)
     print("  Login successful.")
 
 
 def logout(page: Page) -> None:
-    page.get_by_text("Menu").click()
-    # Try common logout label variants
-    for label in ["Log Out", "Logout", "Sign Out", "Sign out"]:
+    # Desktop view has a "Sign Out" link directly in the header (no Menu click needed)
+    for label in ["Sign Out", "Sign out", "Log Out", "Logout"]:
         locator = page.get_by_text(label, exact=True)
         if locator.count() > 0:
             locator.click()
             break
-    page.wait_for_selector("text=Log In", timeout=10_000)
+    page.wait_for_selector("text=Login", timeout=10_000)
     print("  Logged out.")
 
 
@@ -165,7 +164,7 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
     formatted_date = pickup_date.strftime(DATE_FORMAT)
 
     # ── Navigate to Refill Multiple ───────────────────────────────────────────
-    page.get_by_text("Menu").click()
+    # Desktop view shows a sidebar — click Medications directly (no Menu button needed)
     page.get_by_text("Medications").click()
     page.wait_for_selector("text=Refill Multiple", timeout=10_000)
     page.get_by_text("Refill Multiple").click()
