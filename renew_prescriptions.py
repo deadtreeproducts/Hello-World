@@ -81,20 +81,62 @@ def send_notification(subject: str, body: str) -> None:
 
 # ── Core automation ────────────────────────────────────────────────────────────
 
+def _find_field(page: Page, labels: list[str], placeholders: list[str], selectors: list[str]) -> "Locator":
+    """Try multiple strategies to locate a form field, return the first match."""
+    for text in labels:
+        loc = page.get_by_label(text, exact=False)
+        if loc.count() > 0:
+            return loc.first
+    for text in placeholders:
+        loc = page.get_by_placeholder(text, exact=False)
+        if loc.count() > 0:
+            return loc.first
+    for sel in selectors:
+        loc = page.locator(sel)
+        if loc.count() > 0:
+            return loc.first
+    # Return the last selector as a fallback (will timeout with a clear error)
+    return page.locator(selectors[-1])
+
+
 def login(page: Page, username: str, password: str) -> None:
     page.goto(LOGIN_URL, wait_until="networkidle")
-    # Fill credentials — try label-based selectors first, then placeholder fallbacks
-    username_field = page.get_by_label("Username")
-    if username_field.count() == 0:
-        username_field = page.get_by_placeholder("Username")
+    # Screenshot the login page so we can inspect it if anything goes wrong
+    page.screenshot(path="login_page.png")
+
+    # Username field — try every common label/placeholder/selector pattern
+    username_field = _find_field(
+        page,
+        labels=["Username", "User Name", "Email", "Email Address", "User ID", "Phone"],
+        placeholders=["Username", "User Name", "Email", "Email Address", "User ID", "Phone Number"],
+        selectors=[
+            "input[name='username']", "input[id='username']",
+            "input[type='email']", "input[type='tel']",
+            "input[name='email']", "input[id='email']",
+            "input[type='text']:visible",
+        ],
+    )
     username_field.fill(username)
 
-    password_field = page.get_by_label("Password")
-    if password_field.count() == 0:
-        password_field = page.get_by_placeholder("Password")
+    # Password field
+    password_field = _find_field(
+        page,
+        labels=["Password", "Pass"],
+        placeholders=["Password", "Enter password"],
+        selectors=[
+            "input[type='password']",
+            "input[name='password']", "input[id='password']",
+        ],
+    )
     password_field.fill(password)
 
-    page.get_by_role("button", name="Log In").click()
+    # Login button — try common button text variants
+    for btn_name in ["Log In", "Login", "Sign In", "Submit"]:
+        btn = page.get_by_role("button", name=btn_name, exact=False)
+        if btn.count() > 0:
+            btn.first.click()
+            break
+
     # Wait until the post-login "Menu" element appears
     page.wait_for_selector("text=Menu", timeout=20_000)
     print("  Login successful.")

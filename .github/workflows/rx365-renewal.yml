@@ -39,11 +39,11 @@ jobs:
           CARRIER_SMS_GATEWAY:        ${{ secrets.CARRIER_SMS_GATEWAY }}
         run: python renew_prescriptions.py
 
-      - name: Upload error screenshots on failure
+      - name: Upload debug screenshots on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: error-screenshots
-          path: "error_*.png"
+          path: "*.png"
           if-no-files-found: ignore
           retention-days: 7
