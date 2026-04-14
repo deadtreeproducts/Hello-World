@@ -170,21 +170,22 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
     page.get_by_text("Refill Multiple").click()
 
     # ── Expand the time filter so all prescriptions are visible ───────────────
-    # The default "Last 90 days" filter can hide prescriptions with older fills.
-    time_filter = page.locator("text=Last 90 days")
-    if time_filter.count() > 0:
-        time_filter.click()
-        page.wait_for_timeout(500)
-        # Pick the longest/all-time option available
-        for option_text in ["All time", "All Time", "All", "1 year", "2 years", "18 months"]:
-            opt = page.get_by_role("option", name=option_text, exact=False)
-            if opt.count() == 0:
-                opt = page.get_by_text(option_text, exact=False)
-            if opt.count() > 0:
-                opt.first.click()
-                page.wait_for_timeout(500)
+    # The filter is a native <select> element — use select_option(), not click().
+    time_select = page.locator("select").filter(has_text="Last 90 days")
+    if time_select.count() > 0:
+        # Get all available option labels and pick the longest period
+        all_options = time_select.locator("option").all_text_contents()
+        print(f"  Time filter options: {all_options}")
+        chosen = None
+        for candidate in ["All time", "All Time", "All", "2 years", "1 year", "18 months", "Last 365 days"]:
+            if any(candidate.lower() in o.lower() for o in all_options):
+                chosen = next(o for o in all_options if candidate.lower() in o.lower())
                 break
-        print("  Expanded medication time filter.")
+        if chosen is None:
+            chosen = all_options[-1]  # fallback: pick the last option (longest period)
+        time_select.select_option(label=chosen)
+        page.wait_for_timeout(500)
+        print(f"  Set time filter to: {chosen}")
 
     # ── Select prescriptions by Rx# ───────────────────────────────────────────
     # The app uses React-style radio buttons: the <input> is hidden behind a
