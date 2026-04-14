@@ -104,6 +104,12 @@ def login(page: Page, username: str, password: str) -> None:
     # Screenshot the login page so we can inspect it if anything goes wrong
     page.screenshot(path="login_page.png")
 
+    # Dismiss the "Redirected" modal that appears on first load
+    ok_btn = page.get_by_role("button", name="OK")
+    if ok_btn.count() > 0:
+        ok_btn.click()
+        page.wait_for_timeout(500)  # brief pause for modal to close
+
     # Username field — try every common label/placeholder/selector pattern
     username_field = _find_field(
         page,
