@@ -169,13 +169,33 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
     page.wait_for_selector("text=Refill Multiple", timeout=10_000)
     page.get_by_text("Refill Multiple").click()
 
+    # ── Expand the time filter so all prescriptions are visible ───────────────
+    # The default "Last 90 days" filter can hide prescriptions with older fills.
+    time_filter = page.locator("text=Last 90 days")
+    if time_filter.count() > 0:
+        time_filter.click()
+        page.wait_for_timeout(500)
+        # Pick the longest/all-time option available
+        for option_text in ["All time", "All Time", "All", "1 year", "2 years", "18 months"]:
+            opt = page.get_by_role("option", name=option_text, exact=False)
+            if opt.count() == 0:
+                opt = page.get_by_text(option_text, exact=False)
+            if opt.count() > 0:
+                opt.first.click()
+                page.wait_for_timeout(500)
+                break
+        print("  Expanded medication time filter.")
+
     # ── Select prescriptions by Rx# ───────────────────────────────────────────
-    # Identify each prescription by its unique Rx# to avoid duplicate-name issues.
+    # The app uses React-style radio buttons: the <input> is hidden behind a
+    # custom styled circle. We must click the outer RadioButton container, not
+    # the hidden input (which is readonly and invisible).
     for rx_num in rx_numbers:
-        # Find the text "Rx# <number>", then walk up to its containing card/row
+        # Find the text "Rx# <number>" on the page
         rx_text = page.locator(f"text=Rx# {rx_num}")
         rx_text.wait_for(timeout=10_000)
-        # Try multiple ancestor tag patterns to find the card boundary
+
+        # Walk up to the card/row boundary
         row = None
         for xpath in [
             "xpath=ancestor::li[1]",
@@ -183,6 +203,7 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
             "xpath=ancestor::div[contains(@class,'item')][1]",
             "xpath=ancestor::div[contains(@class,'row')][1]",
             "xpath=ancestor::section[1]",
+            "xpath=ancestor::div[3]",
         ]:
             candidate = rx_text.locator(xpath)
             if candidate.count() > 0:
@@ -190,17 +211,19 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
                 break
 
         if row is None:
-            # Last resort: check the nearest checkbox anywhere on the page
-            # that is visually closest to this Rx# text
-            print(f"  WARNING: Could not find container for Rx# {rx_num}, trying page-level checkbox")
-            page.locator("input[type='checkbox']").nth(rx_numbers.index(rx_num)).check()
+            print(f"  WARNING: Could not find card for Rx# {rx_num}")
+            # Force-click the nth hidden input as last resort
+            page.locator("input[type='checkbox']").nth(rx_numbers.index(rx_num)).click(force=True)
         else:
-            checkbox = row.get_by_role("checkbox")
-            if checkbox.count() == 0:
-                checkbox = row.locator("input[type='checkbox']")
-            checkbox.check()
+            # Click the outer RadioButton container (the visible circle), not the hidden input
+            radio = row.locator("[class*='RadioButton']").first
+            if radio.count() > 0:
+                radio.click()
+            else:
+                # Fallback: force-click the hidden input to trigger React's onChange
+                row.locator("input[type='checkbox']").first.click(force=True)
 
-        print(f"  Checked Rx# {rx_num}")
+        print(f"  Selected Rx# {rx_num}")
 
     # ── Open the date/time dialog ─────────────────────────────────────────────
     page.get_by_text("Request Refill").first.click()
