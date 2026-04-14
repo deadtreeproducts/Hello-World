@@ -24,11 +24,8 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Install Playwright system dependencies
-        run: sudo playwright install-deps chromium
-
       - name: Install Playwright browser (Chromium only)
-        run: playwright install chromium
+        run: python -m playwright install --with-deps chromium
 
       - name: Run renewal script
         env:
