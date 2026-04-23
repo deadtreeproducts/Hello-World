@@ -206,12 +206,30 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
             print(f"  WARNING: Could not locate card for Rx# {rx_num}, skipping.")
             continue
 
-        # Click the outer RadioButton container (the visible circle), not the hidden input
-        radio = row.locator("[class*='RadioButton']").first
-        if radio.count() > 0:
-            radio.click()
-        else:
-            row.locator("input[type='checkbox']").first.click(force=True)
+        # The visible circle is a custom-styled div; the actual <input> is hidden/readonly.
+        # Strategy 1: click a div with RadioButton in its class (outer circle container)
+        # Strategy 2: click the entire card row (may have an onClick handler)
+        # Strategy 3: dispatch a native JS click on the hidden input (React will handle it)
+        clicked = False
+        radio_div = row.locator("div[class*='RadioButton']").first
+        if radio_div.count() > 0:
+            try:
+                radio_div.click(timeout=3000)
+                clicked = True
+            except Exception:
+                pass
+
+        if not clicked:
+            try:
+                row.click(timeout=3000)
+                clicked = True
+            except Exception:
+                pass
+
+        if not clicked:
+            hidden_input = row.locator("input[type='checkbox']").first
+            page.evaluate("el => el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}))",
+                          hidden_input.element_handle())
 
         print(f"  Selected Rx# {rx_num}")
 
