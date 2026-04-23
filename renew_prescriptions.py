@@ -164,37 +164,28 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
     formatted_date = pickup_date.strftime(DATE_FORMAT)
 
     # ── Navigate to Refill Multiple ───────────────────────────────────────────
-    # Desktop view shows a sidebar — click Medications directly (no Menu button needed)
     page.get_by_text("Medications").click()
     page.wait_for_selector("text=Refill Multiple", timeout=10_000)
     page.get_by_text("Refill Multiple").click()
+    page.wait_for_timeout(1000)
 
-    # ── Expand the time filter so all prescriptions are visible ───────────────
-    # The filter is a native <select> element — use select_option(), not click().
-    time_select = page.locator("select").filter(has_text="Last 90 days")
-    if time_select.count() > 0:
-        # Get all available option labels and pick the longest period
-        all_options = time_select.locator("option").all_text_contents()
-        print(f"  Time filter options: {all_options}")
-        chosen = None
-        for candidate in ["All time", "All Time", "All", "2 years", "1 year", "18 months", "Last 365 days"]:
-            if any(candidate.lower() in o.lower() for o in all_options):
-                chosen = next(o for o in all_options if candidate.lower() in o.lower())
-                break
-        if chosen is None:
-            chosen = all_options[-1]  # fallback: pick the last option (longest period)
-        time_select.select_option(label=chosen)
-        page.wait_for_timeout(500)
-        print(f"  Set time filter to: {chosen}")
+    # ── Select each prescription using the search box ─────────────────────────
+    # Use the search box ("Search by medication, prescriber, Rx number") to
+    # filter to each Rx# one at a time — avoids time-filter "Custom" breakage.
+    search_box = page.get_by_placeholder("Search by medication, prescriber, Rx number")
 
-    # ── Select prescriptions by Rx# ───────────────────────────────────────────
-    # The app uses React-style radio buttons: the <input> is hidden behind a
-    # custom styled circle. We must click the outer RadioButton container, not
-    # the hidden input (which is readonly and invisible).
     for rx_num in rx_numbers:
-        # Find the text "Rx# <number>" on the page
+        # Filter the list to this Rx#
+        if search_box.count() > 0:
+            search_box.fill("")
+            search_box.fill(rx_num)
+            page.wait_for_timeout(800)
+
+        # Find the Rx# text on the page
         rx_text = page.locator(f"text=Rx# {rx_num}")
-        rx_text.wait_for(timeout=10_000)
+        if rx_text.count() == 0:
+            print(f"  WARNING: Rx# {rx_num} not found — may not be eligible for refill, skipping.")
+            continue
 
         # Walk up to the card/row boundary
         row = None
@@ -212,19 +203,22 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
                 break
 
         if row is None:
-            print(f"  WARNING: Could not find card for Rx# {rx_num}")
-            # Force-click the nth hidden input as last resort
-            page.locator("input[type='checkbox']").nth(rx_numbers.index(rx_num)).click(force=True)
+            print(f"  WARNING: Could not locate card for Rx# {rx_num}, skipping.")
+            continue
+
+        # Click the outer RadioButton container (the visible circle), not the hidden input
+        radio = row.locator("[class*='RadioButton']").first
+        if radio.count() > 0:
+            radio.click()
         else:
-            # Click the outer RadioButton container (the visible circle), not the hidden input
-            radio = row.locator("[class*='RadioButton']").first
-            if radio.count() > 0:
-                radio.click()
-            else:
-                # Fallback: force-click the hidden input to trigger React's onChange
-                row.locator("input[type='checkbox']").first.click(force=True)
+            row.locator("input[type='checkbox']").first.click(force=True)
 
         print(f"  Selected Rx# {rx_num}")
+
+    # Clear the search so the full selection is visible before submitting
+    if search_box.count() > 0:
+        search_box.fill("")
+        page.wait_for_timeout(500)
 
     # ── Open the date/time dialog ─────────────────────────────────────────────
     page.get_by_text("Request Refill").first.click()
