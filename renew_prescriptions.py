@@ -244,16 +244,29 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
     # ── Date selection (calendar grid picker) ─────────────────────────────────
     page.get_by_text("Select a date").click()
     page.wait_for_timeout(800)  # wait for calendar to render
+    page.screenshot(path="calendar_open.png")
 
     day_str = str(pickup_date.day)
 
-    # Calendar days are buttons — try role=button first, then gridcell fallback
-    day_btn = page.get_by_role("button", name=day_str, exact=True).first
-    if day_btn.count() > 0:
-        day_btn.click()
-    else:
-        # Fallback: any visible element whose complete text is just the day number
-        page.locator(f"text='{day_str}'").first.click()
+    # Try multiple strategies — day cells may use aria-labels or plain text
+    clicked_day = False
+    for attempt in [
+        # Exact visible text "23"
+        lambda: page.get_by_text(day_str, exact=True).first.click(timeout=3000),
+        # role=button substring match (aria-label may be "April 23, 2026")
+        lambda: page.get_by_role("button", name=day_str, exact=False).first.click(timeout=3000),
+        # Playwright text= exact selector syntax
+        lambda: page.locator(f"text='{day_str}'").first.click(timeout=3000),
+    ]:
+        try:
+            attempt()
+            clicked_day = True
+            print(f"  Clicked day {day_str}")
+            break
+        except Exception as e:
+            print(f"  Day click attempt failed: {e}")
+
+    page.screenshot(path="calendar_after_click.png")
 
     # Confirm the date selection with the "Select" button at the bottom
     page.get_by_role("button", name="Select").click()
