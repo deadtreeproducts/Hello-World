@@ -241,24 +241,30 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
     # ── Open the date/time dialog ─────────────────────────────────────────────
     page.get_by_text("Request Refill").first.click()
 
-    # ── Date selection ────────────────────────────────────────────────────────
+    # ── Date selection (calendar grid picker) ─────────────────────────────────
     page.get_by_text("Select a date").click()
+    page.wait_for_timeout(800)  # wait for calendar to render
 
-    # Try text input (type="text" or type="date")
-    date_input = page.get_by_label("Date")
-    if date_input.count() > 0 and date_input.first.is_visible():
-        date_input.first.fill(formatted_date)
+    day_str = str(pickup_date.day)
+
+    # Calendar days are buttons — try role=button first, then gridcell fallback
+    day_btn = page.get_by_role("button", name=day_str, exact=True).first
+    if day_btn.count() > 0:
+        day_btn.click()
     else:
-        # Calendar grid fallback: click the correct day cell
-        day_str = str(pickup_date.day)
-        page.get_by_role("gridcell", name=day_str, exact=True).click()
+        # Fallback: any visible element whose complete text is just the day number
+        page.locator(f"text='{day_str}'").first.click()
+
+    # Confirm the date selection with the "Select" button at the bottom
+    page.get_by_role("button", name="Select").click()
+    page.wait_for_timeout(500)
 
     # ── Time selection ────────────────────────────────────────────────────────
-    # The time picker is a grid of buttons (10:30 AM, 11:00 AM, 11:30 AM …)
-    # inside a "Confirm Refill Request" modal. Click the time then "Select".
     page.get_by_text("Select a time").click()
+    page.wait_for_timeout(500)
     page.get_by_role("button", name=PICKUP_TIME, exact=True).click()
     page.get_by_role("button", name="Select").click()
+    page.wait_for_timeout(500)
 
     # ── Final confirmation ────────────────────────────────────────────────────
     page.get_by_text("Request Refill").last.click()
