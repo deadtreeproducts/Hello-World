@@ -7,6 +7,7 @@ Credentials and Rx# lists are read from environment variables (GitHub Secrets).
 """
 
 import os
+import re
 import sys
 import smtplib
 from datetime import date, timedelta
@@ -243,28 +244,105 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
 
     # ── Date selection (calendar grid picker) ─────────────────────────────────
     page.get_by_text("Select a date").click()
-    page.wait_for_timeout(800)  # wait for calendar to render
+    page.wait_for_timeout(1200)  # wait for calendar to render
     page.screenshot(path="calendar_open.png")
 
     day_str = str(pickup_date.day)
+    iso_date = pickup_date.strftime("%Y-%m-%d")
+    # Full date labels used by accessible pickers ("April 23, 2026" style)
+    full_label = pickup_date.strftime("%B %-d, %Y")        # Linux/macOS: no zero-pad
+    full_label_pad = pickup_date.strftime("%B %d, %Y")     # zero-padded fallback
 
-    # Try multiple strategies — day cells may use aria-labels or plain text
+    # Emit a JS diagnostic before attempting any click so we can see what's in the DOM
+    dom_info = page.evaluate(r"""() => {
+        const sel = 'button, [role="button"], [role="gridcell"], td, [tabindex]';
+        return Array.from(document.querySelectorAll(sel))
+            .filter(el => /^\s*\d{1,2}\s*$/.test(el.textContent))
+            .map(el => ({
+                tag: el.tagName,
+                txt: el.textContent.trim(),
+                role: el.getAttribute('role'),
+                aria: el.getAttribute('aria-label'),
+                cls: el.className.slice(0, 80),
+                disabled: el.disabled || el.getAttribute('aria-disabled') === 'true',
+            }));
+    }""")
+    print(f"  Calendar day elements found in DOM: {dom_info}")
+
     clicked_day = False
-    for attempt in [
-        # Exact visible text "23"
-        lambda: page.get_by_text(day_str, exact=True).first.click(timeout=3000),
-        # role=button substring match (aria-label may be "April 23, 2026")
-        lambda: page.get_by_role("button", name=day_str, exact=False).first.click(timeout=3000),
-        # Playwright text= exact selector syntax
-        lambda: page.locator(f"text='{day_str}'").first.click(timeout=3000),
-    ]:
+
+    # Strategy 1: full date aria-label (e.g. MUI, Headless UI — "April 23, 2026")
+    for label in [full_label, full_label_pad]:
         try:
-            attempt()
-            clicked_day = True
-            print(f"  Clicked day {day_str}")
-            break
+            loc = page.get_by_role("button", name=label, exact=True)
+            if loc.count() > 0:
+                loc.first.click(timeout=3000)
+                page.wait_for_timeout(400)
+                clicked_day = True
+                print(f"  Clicked day via aria-label '{label}'")
+                break
         except Exception as e:
-            print(f"  Day click attempt failed: {e}")
+            print(f"  aria-label '{label}' attempt failed: {e}")
+    if clicked_day:
+        pass
+    else:
+        # Strategy 2: data-date or data-value ISO attribute
+        for attr in [f"[data-date='{iso_date}']", f"[data-value='{iso_date}']",
+                     f"[data-day='{day_str}']"]:
+            try:
+                loc = page.locator(attr)
+                if loc.count() > 0:
+                    loc.first.click(timeout=3000)
+                    page.wait_for_timeout(400)
+                    clicked_day = True
+                    print(f"  Clicked day via attribute {attr}")
+                    break
+            except Exception as e:
+                print(f"  Attribute {attr} attempt failed: {e}")
+
+    if not clicked_day:
+        # Strategy 3: button/gridcell whose full text content is exactly the day number
+        for loc in [
+            page.locator("button").filter(has_text=re.compile(rf"^\s*{re.escape(day_str)}\s*$")),
+            page.get_by_role("gridcell", name=day_str, exact=True),
+            page.locator(f"td").filter(has_text=re.compile(rf"^\s*{re.escape(day_str)}\s*$")),
+        ]:
+            try:
+                if loc.count() > 0:
+                    loc.first.click(timeout=3000)
+                    page.wait_for_timeout(400)
+                    clicked_day = True
+                    print(f"  Clicked day via exact-text locator")
+                    break
+            except Exception as e:
+                print(f"  Exact-text locator attempt failed: {e}")
+
+    if not clicked_day:
+        # Strategy 4: JavaScript forceful click — walks every interactive element
+        js_result = page.evaluate(f"""() => {{
+            const candidates = Array.from(document.querySelectorAll(
+                'button, [role="button"], [role="gridcell"], td, [tabindex]'
+            ));
+            const dayBtn = candidates.find(el => {{
+                const txt = el.textContent.trim();
+                const notDisabled = !el.disabled && el.getAttribute('aria-disabled') !== 'true';
+                return txt === '{day_str}' && notDisabled;
+            }});
+            if (dayBtn) {{
+                dayBtn.dispatchEvent(new MouseEvent('mousedown', {{bubbles:true, cancelable:true}}));
+                dayBtn.dispatchEvent(new MouseEvent('mouseup',   {{bubbles:true, cancelable:true}}));
+                dayBtn.click();
+                return 'clicked: ' + dayBtn.outerHTML.slice(0, 300);
+            }}
+            return 'not-found';
+        }}""")
+        print(f"  JS click result: {js_result}")
+        if js_result and js_result.startswith("clicked:"):
+            page.wait_for_timeout(400)
+            clicked_day = True
+
+    if not clicked_day:
+        print(f"  WARNING: Could not click day {day_str} — proceeding anyway (Select button may be grayed)")
 
     page.screenshot(path="calendar_after_click.png")
 
