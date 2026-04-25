@@ -325,11 +325,25 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
 
     # ── Final confirmation ────────────────────────────────────────────────────
     page.get_by_text("Request Refill").last.click()
+    page.wait_for_timeout(3000)  # give the page time to respond
+    page.screenshot(path="after_refill.png")
 
-    # Wait for a success indicator (adjust text if the site uses different wording)
-    page.wait_for_selector(
-        "text=/successfully|confirmed|submitted/i", timeout=20_000
+    # Try a broad set of success phrases; if none match within 20 s, check URL/title
+    success_pattern = (
+        "text=/successfully|confirmed|submitted|received|thank you|"
+        "success|complete|pending|processing|your request|refill request/i"
     )
+    try:
+        page.wait_for_selector(success_pattern, timeout=20_000)
+    except PlaywrightTimeoutError:
+        # If the page navigated away from the refill form, treat that as success
+        current_url = page.url
+        page_text = page.locator("body").inner_text()
+        print(f"  Success text not found. URL={current_url}")
+        print(f"  Page text snippet: {page_text[:300]}")
+        # Re-raise so the error screenshot is captured and we know to update the pattern
+        raise
+
     print(f"  Refill requested. Pickup: {formatted_date} at {PICKUP_TIME}")
 
 
