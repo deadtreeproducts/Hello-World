@@ -330,7 +330,9 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
     page.wait_for_timeout(3000)  # give the page time to respond
     page.screenshot(path="after_refill.png")
 
-    # Try a broad set of success phrases; if none match within 20 s, check URL/title
+    # Two success signals:
+    # 1. A confirmation modal appears (multi-Rx flow shows "Refill(s) Requested…")
+    # 2. The page navigates back to /medications (single-Rx flow, no modal)
     success_pattern = (
         "text=/successfully|confirmed|submitted|received|thank you|"
         "success|complete|pending|processing|your request|refill request/i"
@@ -338,13 +340,15 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
     try:
         page.wait_for_selector(success_pattern, timeout=20_000)
     except PlaywrightTimeoutError:
-        # If the page navigated away from the refill form, treat that as success
         current_url = page.url
         page_text = page.locator("body").inner_text()
         print(f"  Success text not found. URL={current_url}")
         print(f"  Page text snippet: {page_text[:300]}")
-        # Re-raise so the error screenshot is captured and we know to update the pattern
-        raise
+        if "/medications" in current_url:
+            # Single-Rx flow: navigated straight back to medications list — refill submitted.
+            print("  Navigated back to medications page — refill submitted successfully.")
+        else:
+            raise
 
     print(f"  Refill requested. Pickup: {formatted_date} at {PICKUP_TIME}")
 
