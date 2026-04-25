@@ -346,6 +346,24 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
 
     print(f"  Refill requested. Pickup: {formatted_date} at {PICKUP_TIME}")
 
+    # Dismiss the confirmation modal so the page is interactive for logout.
+    # Try common close/done buttons first, then Escape, then wait for the
+    # ReactModal overlay to disappear on its own.
+    for close_label in ["Done", "OK", "Close", "Got it", "Dismiss", "Continue"]:
+        btn = page.get_by_role("button", name=close_label, exact=True)
+        if btn.count() > 0:
+            btn.click()
+            page.wait_for_timeout(300)
+            break
+    else:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+
+    try:
+        page.wait_for_selector(".ReactModal__Overlay", state="detached", timeout=5_000)
+    except PlaywrightTimeoutError:
+        pass  # modal already gone or doesn't use this class
+
 
 def run_user(
     browser: Browser,
