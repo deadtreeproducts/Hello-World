@@ -145,6 +145,8 @@ def login(page: Page, username: str, password: str) -> None:
             break
 
     # Wait until the post-login sidebar appears (desktop view shows sidebar, not hamburger)
+    page.wait_for_timeout(2000)
+    page.screenshot(path="after_login.png")
     page.wait_for_selector("text=Medications", timeout=20_000)
     print("  Login successful.")
 
