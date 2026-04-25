@@ -249,100 +249,93 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
 
     day_str = str(pickup_date.day)
     iso_date = pickup_date.strftime("%Y-%m-%d")
-    # Full date labels used by accessible pickers ("April 23, 2026" style)
-    full_label = pickup_date.strftime("%B %-d, %Y")        # Linux/macOS: no zero-pad
-    full_label_pad = pickup_date.strftime("%B %d, %Y")     # zero-padded fallback
 
-    # Emit a JS diagnostic before attempting any click so we can see what's in the DOM
-    dom_info = page.evaluate(r"""() => {
-        const sel = 'button, [role="button"], [role="gridcell"], td, [tabindex]';
-        return Array.from(document.querySelectorAll(sel))
-            .filter(el => /^\s*\d{1,2}\s*$/.test(el.textContent))
-            .map(el => ({
-                tag: el.tagName,
-                txt: el.textContent.trim(),
-                role: el.getAttribute('role'),
-                aria: el.getAttribute('aria-label'),
-                cls: el.className.slice(0, 80),
-                disabled: el.disabled || el.getAttribute('aria-disabled') === 'true',
-            }));
+    # Dump the calendar container HTML so we can see the exact element structure
+    cal_html = page.evaluate(r"""() => {
+        const selectors = [
+            '[class*="Calendar"]', '[class*="calendar"]',
+            '[class*="DatePicker"]', '[class*="datePicker"]',
+            '[class*="Picker"]', '[class*="picker"]',
+            '[class*="Modal"]', '[class*="modal"]',
+            '[class*="Dialog"]', '[class*="dialog"]',
+        ];
+        for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el) return sel + ': ' + el.innerHTML.slice(0, 3000);
+        }
+        return 'no calendar container found — body: ' + document.body.innerHTML.slice(0, 3000);
     }""")
-    print(f"  Calendar day elements found in DOM: {dom_info}")
+    print(f"  Calendar HTML: {cal_html}")
 
     clicked_day = False
 
-    # Strategy 1: full date aria-label (e.g. MUI, Headless UI — "April 23, 2026")
-    for label in [full_label, full_label_pad]:
-        try:
-            loc = page.get_by_role("button", name=label, exact=True)
-            if loc.count() > 0:
-                loc.first.click(timeout=3000)
-                page.wait_for_timeout(400)
-                clicked_day = True
-                print(f"  Clicked day via aria-label '{label}'")
-                break
-        except Exception as e:
-            print(f"  aria-label '{label}' attempt failed: {e}")
-    if clicked_day:
-        pass
-    else:
-        # Strategy 2: data-date or data-value ISO attribute
-        for attr in [f"[data-date='{iso_date}']", f"[data-value='{iso_date}']",
-                     f"[data-day='{day_str}']"]:
-            try:
-                loc = page.locator(attr)
-                if loc.count() > 0:
-                    loc.first.click(timeout=3000)
-                    page.wait_for_timeout(400)
-                    clicked_day = True
-                    print(f"  Clicked day via attribute {attr}")
-                    break
-            except Exception as e:
-                print(f"  Attribute {attr} attempt failed: {e}")
+    # Strategy 1: any element (div/span/p/li/button) whose complete text is the day number
+    js_result = page.evaluate(f"""() => {{
+        const allEls = Array.from(document.querySelectorAll('*'));
+        // Find leaf-like elements whose trimmed text is exactly our day number
+        const candidates = allEls.filter(el => {{
+            const txt = el.textContent.trim();
+            if (txt !== '{day_str}') return false;
+            // Prefer elements with no element children (true leaf) or one child
+            return el.children.length <= 1;
+        }});
+        // Log what we found before clicking
+        const found = candidates.map(el => ({{
+            tag: el.tagName,
+            cls: el.className.slice(0, 80),
+            aria: el.getAttribute('aria-label'),
+            children: el.children.length,
+            outerHTML: el.outerHTML.slice(0, 150),
+        }}));
+        if (candidates.length === 0) {{
+            // Widen net: any element containing the day number as its sole text node
+            const wider = allEls.filter(el => {{
+                const nodes = Array.from(el.childNodes);
+                const textOnly = nodes.filter(n => n.nodeType === 3).map(n => n.textContent.trim()).join('');
+                return textOnly === '{day_str}';
+            }});
+            return 'none-exact. wider=' + JSON.stringify(wider.slice(0,5).map(el => ({{
+                tag: el.tagName, cls: el.className.slice(0,80), outer: el.outerHTML.slice(0,150)
+            }})));
+        }}
+        // Click the first non-disabled candidate
+        for (const el of candidates) {{
+            const disabled = el.disabled || el.getAttribute('aria-disabled') === 'true'
+                          || el.classList.contains('disabled') || el.classList.contains('past');
+            if (!disabled) {{
+                el.dispatchEvent(new MouseEvent('mousedown', {{bubbles:true, cancelable:true}}));
+                el.dispatchEvent(new MouseEvent('mouseup',   {{bubbles:true, cancelable:true}}));
+                el.click();
+                return 'clicked: ' + el.tagName + ' cls=' + el.className + ' | ' + el.outerHTML.slice(0, 200);
+            }}
+        }}
+        return 'all-disabled: ' + JSON.stringify(found);
+    }}""")
+    print(f"  Day click JS result: {js_result}")
+    if js_result and js_result.startswith("clicked:"):
+        page.wait_for_timeout(400)
+        clicked_day = True
 
     if not clicked_day:
-        # Strategy 3: button/gridcell whose full text content is exactly the day number
+        # Strategy 2: Playwright locator on div/span with exact text
         for loc in [
-            page.locator("button").filter(has_text=re.compile(rf"^\s*{re.escape(day_str)}\s*$")),
-            page.get_by_role("gridcell", name=day_str, exact=True),
-            page.locator(f"td").filter(has_text=re.compile(rf"^\s*{re.escape(day_str)}\s*$")),
+            page.locator("div").filter(has_text=re.compile(rf"^\s*{re.escape(day_str)}\s*$")),
+            page.locator("span").filter(has_text=re.compile(rf"^\s*{re.escape(day_str)}\s*$")),
+            page.locator("p").filter(has_text=re.compile(rf"^\s*{re.escape(day_str)}\s*$")),
+            page.locator("li").filter(has_text=re.compile(rf"^\s*{re.escape(day_str)}\s*$")),
         ]:
             try:
                 if loc.count() > 0:
                     loc.first.click(timeout=3000)
                     page.wait_for_timeout(400)
                     clicked_day = True
-                    print(f"  Clicked day via exact-text locator")
+                    print(f"  Clicked day via Playwright div/span locator")
                     break
             except Exception as e:
-                print(f"  Exact-text locator attempt failed: {e}")
+                print(f"  div/span locator attempt failed: {e}")
 
     if not clicked_day:
-        # Strategy 4: JavaScript forceful click — walks every interactive element
-        js_result = page.evaluate(f"""() => {{
-            const candidates = Array.from(document.querySelectorAll(
-                'button, [role="button"], [role="gridcell"], td, [tabindex]'
-            ));
-            const dayBtn = candidates.find(el => {{
-                const txt = el.textContent.trim();
-                const notDisabled = !el.disabled && el.getAttribute('aria-disabled') !== 'true';
-                return txt === '{day_str}' && notDisabled;
-            }});
-            if (dayBtn) {{
-                dayBtn.dispatchEvent(new MouseEvent('mousedown', {{bubbles:true, cancelable:true}}));
-                dayBtn.dispatchEvent(new MouseEvent('mouseup',   {{bubbles:true, cancelable:true}}));
-                dayBtn.click();
-                return 'clicked: ' + dayBtn.outerHTML.slice(0, 300);
-            }}
-            return 'not-found';
-        }}""")
-        print(f"  JS click result: {js_result}")
-        if js_result and js_result.startswith("clicked:"):
-            page.wait_for_timeout(400)
-            clicked_day = True
-
-    if not clicked_day:
-        print(f"  WARNING: Could not click day {day_str} — proceeding anyway (Select button may be grayed)")
+        print(f"  WARNING: Could not click day {day_str} — check 'Calendar HTML' log above for element structure")
 
     page.screenshot(path="calendar_after_click.png")
 
