@@ -257,28 +257,54 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
 
     # Primary: JS click — scoped to daysOfMonth, skips disabled radios, clicks label
     clicked_day = False
-    js_result = page.evaluate(f"""() => {{
+    # Get the label's viewport coordinates so we can use Playwright's real mouse click.
+    # page.mouse.click() generates genuine pointer/mouse events that React's synthetic
+    # event system responds to (unlike JS el.click() which may be ignored for radio inputs).
+    label_coords = page.evaluate(f"""() => {{
         const container = document.querySelector('[class*="daysOfMonth"]');
-        if (!container) return 'no-daysOfMonth-container';
+        if (!container) return null;
         for (const label of container.querySelectorAll('label')) {{
             if (label.textContent.trim() !== '{day_str}') continue;
             const radio = document.getElementById(label.getAttribute('for'));
             if (radio && radio.disabled) continue;  // skip past/unavailable dates
-            label.click();
-            // Fire change on the radio so React's synthetic event fires
-            if (radio) radio.dispatchEvent(new Event('change', {{bubbles: true}}));
-            return 'clicked: ' + label.outerHTML.slice(0, 200);
+            const rect = label.getBoundingClientRect();
+            return {{x: rect.x + rect.width / 2, y: rect.y + rect.height / 2}};
         }}
-        const all = Array.from(container.querySelectorAll('label')).map(l => {{
-            const r = document.getElementById(l.getAttribute('for'));
-            return l.textContent.trim() + (r && r.disabled ? '(dis)' : '(en)');
-        }});
-        return 'not-found. labels=[' + all.join(', ') + ']';
+        return null;
     }}""")
-    print(f"  Day click JS result: {js_result}")
-    if js_result and js_result.startswith("clicked:"):
+
+    if label_coords:
+        page.mouse.click(label_coords['x'], label_coords['y'])
         page.wait_for_timeout(400)
         clicked_day = True
+        print(f"  Clicked day {day_str} at ({label_coords['x']:.0f}, {label_coords['y']:.0f})")
+    else:
+        # Fallback: React nativeInputValueSetter — bypasses React's change-detection guard
+        js_result = page.evaluate(f"""() => {{
+            const container = document.querySelector('[class*="daysOfMonth"]');
+            if (!container) return 'no-daysOfMonth-container';
+            for (const label of container.querySelectorAll('label')) {{
+                if (label.textContent.trim() !== '{day_str}') continue;
+                const radio = document.getElementById(label.getAttribute('for'));
+                if (!radio || radio.disabled) continue;
+                const nativeSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'checked'
+                ).set;
+                nativeSetter.call(radio, true);
+                radio.dispatchEvent(new Event('input',  {{bubbles: true}}));
+                radio.dispatchEvent(new Event('change', {{bubbles: true}}));
+                return 'react-setter: ' + radio.id.slice(0, 100);
+            }}
+            const all = Array.from(container.querySelectorAll('label')).map(l => {{
+                const r = document.getElementById(l.getAttribute('for'));
+                return l.textContent.trim() + (r && r.disabled ? '(dis)' : '(en)');
+            }});
+            return 'not-found. labels=[' + all.join(', ') + ']';
+        }}""")
+        print(f"  Day click JS result: {js_result}")
+        if js_result and (js_result.startswith("clicked:") or js_result.startswith("react-setter:")):
+            page.wait_for_timeout(400)
+            clicked_day = True
 
     if not clicked_day:
         print(f"  WARNING: Could not select day {day_str}")
