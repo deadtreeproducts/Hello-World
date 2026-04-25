@@ -311,15 +311,16 @@ def perform_refill(page: Page, rx_numbers: list[str]) -> None:
 
     page.screenshot(path="calendar_after_click.png")
 
-    # Confirm the date selection with the "Select" button at the bottom
-    page.get_by_role("button", name="Select").click()
+    # Confirm the date selection with the "Select" button at the bottom.
+    # exact=True avoids matching "Select a date" / "Select a time" buttons on the page.
+    page.get_by_role("button", name="Select", exact=True).click()
     page.wait_for_timeout(500)
 
     # ── Time selection ────────────────────────────────────────────────────────
     page.get_by_text("Select a time").click()
     page.wait_for_timeout(500)
     page.get_by_role("button", name=PICKUP_TIME, exact=True).click()
-    page.get_by_role("button", name="Select").click()
+    page.get_by_role("button", name="Select", exact=True).click()
     page.wait_for_timeout(500)
 
     # ── Final confirmation ────────────────────────────────────────────────────
